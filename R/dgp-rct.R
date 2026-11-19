@@ -1,7 +1,7 @@
 # R/dgp-rct.R -- trial-shaped DGPs built on the two reference RCTs used by
 # Graf, Todd & Baksh (2026, Biometrical Journal 68:e70171): PBC (no
 # treatment-covariate interactions) and VACURG advanced prostate cancer
-# (three treatment-covariate interactions). Shared by letter/ and the paper.
+# (three treatment-covariate interactions).
 #
 # Differences from Graf et al. (documented, deliberate):
 # * covariates are resampled rows of the real trial (plasmode), not a fitted
@@ -33,7 +33,6 @@ load_reference <- function(dataset = c("pbc", "prostate")) {
          scale = 2241.74, trt = "trt")
   } else {
     f <- file.path("data-ref", "adv_prostate_ca", "adv_prostate_ca.csv")
-    if (!file.exists(f)) f <- file.path("..", f)
     d <- read.csv(f)
     covs <- c("age", "wt", "sbp", "dbp", "sz", "ap", "hg", "sg", "pf", "hx", "bm", "ekg")
     beta <- c(-0.006, -0.01, -0.016, 0.02, 0.014, 0.0001, -0.006, 0.074, 0.333, 0.467, 0.63, 0.316)

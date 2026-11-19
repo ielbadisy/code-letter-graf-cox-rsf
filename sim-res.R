@@ -1,56 +1,37 @@
-# sim-res.R -- summarise sim-run.R output.
-# Outputs: full summary (mean, MCSE, failure rate) per cell x model x metric,
-# a compact letter table, and the counts quoted in the letter (results/letter_numbers.csv):
-# how often the C index / IBS and the truth-based error disagree on the best model, etc.
-# Run from the repo root: Rscript sim-res.R [reps]
+# sim-res.R -- summarise sim-run.R output. Input: results/sim_raw_<reps>reps.csv.gz.
+# Outputs in results/: sim_summary.csv (mean, MCSE per scenario x model x metric),
+# sim_best_by_cell.csv (best model per scenario and metric), letter_table.csv
+# (N = 200, 30% censoring), letter_numbers.csv (counts quoted in Sections 3-4).
+# Run from the repo root: Rscript sim-res.R 200
+reps <- as.integer(commandArgs(TRUE)[1])
+raw <- read.csv(sprintf("results/sim_raw_%dreps.csv.gz", reps))
+CELL <- c("dataset", "hazard", "n", "cens")
+HIGHER_BETTER <- c(harrell_c = TRUE, ibs = FALSE, mae_true = FALSE)
 
-
-args <- commandArgs(TRUE)
-reps <- if (length(args)) as.integer(args[1]) else 200L
-raw <- read.csv(sprintf("results/sim_raw_%dreps.csv.gz", reps), stringsAsFactors = FALSE)
-keys <- c("dataset", "hazard", "n", "cens", "model", "metric")
-
-cell_id <- do.call(paste, raw[keys])
-summ <- do.call(rbind, lapply(split(raw, cell_id), function(d) {
-  v <- d$value[is.finite(d$value)]
-  data.frame(d[1, keys], mean = mean(v), mcse = sd(v) / sqrt(length(v)),
-             fail = 1 - length(v) / nrow(d), reps = nrow(d))
-}))
-rownames(summ) <- NULL
-summ <- summ[order(summ$dataset, summ$hazard, summ$n, summ$cens, summ$metric, summ$model), ]
+summ <- aggregate(value ~ ., raw[c(CELL, "model", "metric", "value")],
+                  function(v) c(mean = mean(v), mcse = sd(v) / sqrt(length(v))))
+summ <- do.call(data.frame, summ); names(summ) <- sub("^value\\.", "", names(summ))
+summ <- summ[do.call(order, summ[c(CELL, "metric", "model")]), ]
 write.csv(summ, "results/sim_summary.csv", row.names = FALSE)
 
-# best model per cell under each metric (lower is better except the C indices)
-higher_better <- c(harrell_c = TRUE, uno_c = TRUE, ibs = FALSE, mae_true = FALSE, mae_true_med = FALSE)
-cells <- split(summ, do.call(paste, summ[c("dataset", "hazard", "n", "cens")]))
-best <- do.call(rbind, lapply(cells, function(d) {
-  b <- sapply(names(higher_better), function(m) {
-    x <- d[d$metric == m, ]
-    x$model[if (higher_better[[m]]) which.max(x$mean) else which.min(x$mean)]
-  })
-  data.frame(d[1, c("dataset", "hazard", "n", "cens")], t(b))
-}))
-rownames(best) <- NULL
+best <- do.call(rbind, lapply(split(summ, summ[CELL], drop = TRUE), function(d)
+  data.frame(d[1, CELL], as.list(vapply(names(HIGHER_BETTER), function(m) {
+    x <- d[d$metric == m, ]; x$model[which.max(if (HIGHER_BETTER[[m]]) x$mean else -x$mean)]
+  }, ""))))); rownames(best) <- NULL
 write.csv(best, "results/sim_best_by_cell.csv", row.names = FALSE)
-# counts quoted in the letter (Sections 3-4)
-mt <- summ[summ$metric == "mae_true" & summ$hazard == "nph", ]
-w <- reshape(mt[c("dataset", "n", "cens", "model", "mean")], idvar = c("dataset", "n", "cens"),
-             timevar = "model", direction = "wide")
+
+nph <- with(subset(summ, metric == "mae_true" & hazard == "nph"), tapply(mean, list(paste(dataset, n, cens), model), c))
 rsf <- grepl("^rsf", best$mae_true)
 num <- c(n_cells = nrow(best), c_vs_mae_differ = sum(best$harrell_c != best$mae_true),
          ibs_vs_mae_differ = sum(best$ibs != best$mae_true), forest_best = sum(rsf),
-         forest_best_max_n = max(best$n[rsf]), nph_cells = nrow(w),
-         nph_spec_beats_forests = sum(w$mean.cox_spec < pmin(w$mean.rsf_logrank, w$mean.rsf_extratrees)))
+         forest_best_max_n = max(best$n[rsf]), nph_cells = nrow(nph),
+         nph_spec_beats_forests = sum(nph[, "cox_spec"] < pmin(nph[, "rsf_logrank"], nph[, "rsf_extratrees"])))
 write.csv(data.frame(quantity = names(num), value = num), "results/letter_numbers.csv", row.names = FALSE)
-print(num)
 
-# letter table: N = 200, 30% censoring, all hazards, both trials
-lt <- summ[summ$n == 200 & summ$cens == 0.3 & summ$metric %in% c("harrell_c", "ibs", "mae_true"), ]
+lt <- subset(summ, n == 200 & cens == 0.3)
 lt$cell <- sprintf("%.3f (%.3f)", lt$mean, lt$mcse)
-wide <- reshape(lt[c("dataset", "hazard", "model", "metric", "cell")],
-                idvar = c("dataset", "hazard", "model"), timevar = "metric", direction = "wide")
+wide <- reshape(lt[c("dataset", "hazard", "model", "metric", "cell")], direction = "wide",
+                idvar = c("dataset", "hazard", "model"), timevar = "metric")
 names(wide) <- sub("^cell\\.", "", names(wide))
-wide$hazard <- factor(wide$hazard, c("dec", "const", "inc", "nph"))
-wide <- wide[order(wide$dataset, wide$hazard, wide$model), ]
+wide <- wide[order(wide$dataset, match(wide$hazard, c("dec", "const", "inc", "nph")), wide$model), ]
 write.csv(wide, "results/letter_table.csv", row.names = FALSE)
-print(wide, row.names = FALSE)
