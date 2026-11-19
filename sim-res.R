@@ -1,7 +1,7 @@
-# sim-res.R -- summarise letter/sim-run.R output.
+# sim-res.R -- summarise sim-run.R output.
 # Outputs: full summary (mean, MCSE, failure rate) per cell x model x metric,
-# a compact letter table, and how often the C index and the truth-based
-# calibration error disagree on the best model.
+# a compact letter table, and the counts quoted in the letter (results/letter_numbers.csv):
+# how often the C index / IBS and the truth-based error disagree on the best model, etc.
 # Run from the repo root: Rscript sim-res.R [reps]
 
 
@@ -32,20 +32,17 @@ best <- do.call(rbind, lapply(cells, function(d) {
 }))
 rownames(best) <- NULL
 write.csv(best, "results/sim_best_by_cell.csv", row.names = FALSE)
-cat("Cells where Harrell C and truth-based error pick a different best model:",
-    sum(best$harrell_c != best$mae_true), "of", nrow(best), "\n")
-cat("Cells where the IBS and truth-based error pick a different best model:",
-    sum(best$ibs != best$mae_true), "of", nrow(best), "\n")
-cat("Cells where the truth-based error is minimised by each model:\n")
-print(table(best$mae_true))
-rsf <- grepl("^rsf", best$mae_true)
-cat("Training N of the cells won by a forest:", best$n[rsf], "\n")
-# NPH cells: stratified Cox vs the better of the two forests
+# counts quoted in the letter (Sections 3-4)
 mt <- summ[summ$metric == "mae_true" & summ$hazard == "nph", ]
 w <- reshape(mt[c("dataset", "n", "cens", "model", "mean")], idvar = c("dataset", "n", "cens"),
              timevar = "model", direction = "wide")
-cat("NPH cells where cox_spec beats both forests:",
-    sum(w$mean.cox_spec < pmin(w$mean.rsf_logrank, w$mean.rsf_extratrees)), "of", nrow(w), "\n")
+rsf <- grepl("^rsf", best$mae_true)
+num <- c(n_cells = nrow(best), c_vs_mae_differ = sum(best$harrell_c != best$mae_true),
+         ibs_vs_mae_differ = sum(best$ibs != best$mae_true), forest_best = sum(rsf),
+         forest_best_max_n = max(best$n[rsf]), nph_cells = nrow(w),
+         nph_spec_beats_forests = sum(w$mean.cox_spec < pmin(w$mean.rsf_logrank, w$mean.rsf_extratrees)))
+write.csv(data.frame(quantity = names(num), value = num), "results/letter_numbers.csv", row.names = FALSE)
+print(num)
 
 # letter table: N = 200, 30% censoring, all hazards, both trials
 lt <- summ[summ$n == 200 & summ$cens == 0.3 & summ$metric %in% c("harrell_c", "ibs", "mae_true"), ]
